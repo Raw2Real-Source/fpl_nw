@@ -16,14 +16,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
         FPLContractIdSensor(coordinator),
         FPLRecentBillSensor(coordinator),
         FPLAvgDailyCostSensor(coordinator),
-        FPLEstimatedDailyAvgKwhSensor(coordinator),    # New Top-Level Sensor
+        FPLEstimatedDailyAvgKwhSensor(coordinator),
         FPLCurrentCycleAccruedCostSensor(coordinator),
         FPLProjectedBillSensor(coordinator),
         
         # --- Device Group 2: Smart Meter Hardware Device ---
         FPLMeterNumberSensor(coordinator),
         FPLPremiseNumberSensor(coordinator),
-        FPLServiceAddressSensor(coordinator),
         FPLAccountClassSensor(coordinator),
         FPLRateCategorySensor(coordinator),
         FPLLastCycleConsumptionSensor(coordinator)
@@ -33,6 +32,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for category in tracked_categories:
         entities.append(FPLCategoryUsageSensor(coordinator, category))
 
+    # 🟢 FIXED: This line was missing, which caused all appliances to vanish!
     async_add_entities(entities)
 
 
@@ -61,7 +61,7 @@ class FPLAccountBaseSensor(CoordinatorEntity, SensorEntity):
             "name": "FPL Account Profile",
             "manufacturer": "Florida Power & Light",
             "model": "Customer Live & Billing Profile",
-            "sw_version": "1.1.3",
+            "sw_version": "1.1.4",
         }
 
 class FPLEstimatedDailyAvgKwhSensor(FPLAccountBaseSensor):
@@ -120,7 +120,6 @@ class FPLAvgDailyCostSensor(FPLAccountBaseSensor):
         if not self.coordinator.data:
             return attrs
 
-        # Map historical comparison values into clean tracking attributes
         results = self.coordinator.data.get("comparison", {}).get("results", [])
         if results and isinstance(results, list):
             latest_comparison = results[0]
@@ -282,7 +281,10 @@ class FPLAccountNumberSensor(FPLAccountBaseSensor):
     def native_value(self):
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get("summary", {}).get("accountNumber")
+        summary_block = self.coordinator.data.get("summary", {})
+        if not summary_block or not isinstance(summary_block, dict):
+            return None
+        return summary_block.get("accountNumber")
 
     @property
     def extra_state_attributes(self):
@@ -291,15 +293,9 @@ class FPLAccountNumberSensor(FPLAccountBaseSensor):
             
         details = self.coordinator.data.get("lite", {}).get("data", {}).get("contractAccountDetails", {})
         address = details.get("address", {})
-        partner = details.get("businessPartner", {})
         
+        # 🟢 PRIVACY COMPLIANT: Only safe regional properties
         return {
-            "customer_full_name": details.get("name"),
-            "first_name": partner.get("firstName"),
-            "last_name": partner.get("lastName"),
-            "email_address": address.get("email"),
-            "mobile_phone": address.get("mobilePhoneNumber"),
-            "billing_street": f"{address.get('houseNum1', '')} {address.get('street', '')}".strip(),
             "billing_city": address.get("city"),
             "billing_state": address.get("region"),
             "billing_zip": address.get("zip"),
@@ -365,7 +361,7 @@ class FPLMeterBaseSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self):
         summary_block = self.coordinator.data.get("summary", {}) if self.coordinator.data else {}
-        meter_id = summary_block.get("meterNumber", "5814652")
+        meter_id = summary_block.get("meterNumber", "unknown_meter")
         return {
             "identifiers": {(DOMAIN, f"smart_meter_{meter_id}")},
             "name": f"FPL Smart Meter ({meter_id})",
@@ -434,28 +430,40 @@ class FPLMeterNumberSensor(FPLMeterBaseSensor):
     def extra_state_attributes(self):
         if not self.coordinator.data:
             return {}
-        results = self.coordinator.data.get("installations", {}).get("data", {}).get("results", [])
-        if not results or not isinstance(results, list):
-            return {}
             
-        record = results[0]
-        device = record.get("deviceInfo", {})
+        results = self.coordinator.data.get("installations", {}).get("data", {}).get("results", [])
+        lite_address = self.coordinator.data.get("lite", {}).get("data", {}).get("serviceAddress", {})
         
-        return {
-            "meter_model_design": device.get("deviceInfo"),
-            "hardware_material_id": device.get("material"),
-            "register_group": device.get("registerGroup"),
-            "device_location_id": device.get("deviceLocationId"),
-            "ami_enabled_flag": device.get("amiMeter"),
-            "meter_symbol_type": device.get("meterSymbol"),
-            "installation_status": device.get("meterStatus", {}).get("description"),
-            "hardware_installed_date": parse_fpl_date(device.get("installationDate")),
-            "ami_certified_date": parse_fpl_date(device.get("amiDateCertified")),
-            "last_meter_reading_date": parse_fpl_date(record.get("lastMeterReadingDate")),
-            "next_meter_reading_date": parse_fpl_date(record.get("nextMeterReadingDate")),
-            "move_in_date": parse_fpl_date(record.get("contractDetails", {}).get("moveInDate")),
-            "meter_reading_unit": record.get("meterReadingUnitDescription")
-        }
+        attrs = {}
+        if results and isinstance(results, list):
+            record = results[0]
+            device = record.get("deviceInfo", {})
+            
+            attrs.update({
+                "meter_model_design": device.get("deviceInfo"),
+                "hardware_material_id": device.get("material"),
+                "register_group": device.get("registerGroup"),
+                "device_location_id": device.get("deviceLocationId"),
+                "ami_enabled_flag": device.get("amiMeter"),
+                "meter_symbol_type": device.get("meterSymbol"),
+                "installation_status": device.get("meterStatus", {}).get("description"),
+                "hardware_installed_date": parse_fpl_date(device.get("installationDate")),
+                "ami_certified_date": parse_fpl_date(device.get("amiDateCertified")),
+                "last_meter_reading_date": parse_fpl_date(record.get("lastMeterReadingDate")),
+                "next_meter_reading_date": parse_fpl_date(record.get("nextMeterReadingDate")),
+                "move_in_date": parse_fpl_date(record.get("contractDetails", {}).get("moveInDate")),
+                "meter_reading_unit": record.get("meterReadingUnitDescription")
+            })
+            
+        # 🟢 PRIVACY COMPLIANT: Only generic location parameters are appended here
+        if lite_address and isinstance(lite_address, dict):
+            attrs.update({
+                "service_city": lite_address.get("city"),
+                "service_state": lite_address.get("state"),
+                "service_zipcode": lite_address.get("zipcode")
+            })
+            
+        return attrs
 
 
 class FPLRateCategorySensor(FPLMeterBaseSensor):
@@ -521,34 +529,6 @@ class FPLAccountClassSensor(FPLMeterBaseSensor):
         return details.get("accountClass")
 
 
-class FPLServiceAddressSensor(FPLMeterBaseSensor):
-    """Monitors the clear text service location address from lite-info."""
-    
-    def __init__(self, coordinator):
-        super().__init__(coordinator)
-        self.coordinator = coordinator
-        self._attr_name = "FPL Service Address"
-        self._attr_unique_id = f"{coordinator.account}_service_address"
-
-    @property
-    def native_value(self):
-        if not self.coordinator.data:
-            return None
-        address = self.coordinator.data.get("lite", {}).get("data", {}).get("serviceAddress", {})
-        return address.get("line1")
-
-    @property
-    def extra_state_attributes(self):
-        if not self.coordinator.data:
-            return {}
-        address = self.coordinator.data.get("lite", {}).get("data", {}).get("serviceAddress", {})
-        return {
-            "service_city": address.get("city"),
-            "service_state": address.get("state"),
-            "service_zipcode": address.get("zipcode")
-        }
-
-
 # =====================================================================
 # DEVICE GROUP 3: DISAGGREGATED ENERGY CATEGORIES
 # =====================================================================
@@ -558,6 +538,8 @@ class FPLCategoryBaseSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self):
+        summary_block = self.coordinator.data.get("summary", {}) if self.coordinator.data else {}
+        meter_id = summary_block.get("meterNumber", "unknown_meter")
         return {
             "identifiers": {(DOMAIN, f"energy_breakdown_{self.coordinator.account}")},
             "name": "FPL Appliance Energy Breakdown",
