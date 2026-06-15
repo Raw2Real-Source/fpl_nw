@@ -1,0 +1,11 @@
+{
+  "domain": "fpl_gulf",
+  "name": "FPL Northwest Region",
+  "config_flow": true,
+  "documentation": "https://github.com/yourprofile/fpl",
+  "dependencies": [],
+  "codeowners": ["@mmachor"],
+  "requirements": [],
+  "version": "1.0.0",
+  "iot_class": "cloud_polling"
+}
