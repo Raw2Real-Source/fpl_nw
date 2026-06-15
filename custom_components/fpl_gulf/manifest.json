@@ -2,7 +2,7 @@
   "domain": "fpl_gulf",
   "name": "FPL Northwest Region",
   "config_flow": true,
-  "documentation": "https://github.com/Raw2Real-Source/fpl_nw",
+  "documentation": "https://github.com/yourprofile/fpl",
   "dependencies": [],
   "codeowners": ["@mmachor"],
   "requirements": [],

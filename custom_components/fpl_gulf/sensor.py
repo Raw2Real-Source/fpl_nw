@@ -16,13 +16,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
         FPLContractIdSensor(coordinator),
         FPLRecentBillSensor(coordinator),
         FPLAvgDailyCostSensor(coordinator),
-        FPLEstimatedDailyAvgKwhSensor(coordinator),
+        FPLEstimatedDailyAvgKwhSensor(coordinator),    # New Top-Level Sensor
         FPLCurrentCycleAccruedCostSensor(coordinator),
         FPLProjectedBillSensor(coordinator),
         
         # --- Device Group 2: Smart Meter Hardware Device ---
         FPLMeterNumberSensor(coordinator),
         FPLPremiseNumberSensor(coordinator),
+        FPLServiceAddressSensor(coordinator),
         FPLAccountClassSensor(coordinator),
         FPLRateCategorySensor(coordinator),
         FPLLastCycleConsumptionSensor(coordinator)
@@ -60,7 +61,7 @@ class FPLAccountBaseSensor(CoordinatorEntity, SensorEntity):
             "name": "FPL Account Profile",
             "manufacturer": "Florida Power & Light",
             "model": "Customer Live & Billing Profile",
-            "sw_version": "1.1.4",
+            "sw_version": "1.1.3",
         }
 
 class FPLEstimatedDailyAvgKwhSensor(FPLAccountBaseSensor):
@@ -119,6 +120,7 @@ class FPLAvgDailyCostSensor(FPLAccountBaseSensor):
         if not self.coordinator.data:
             return attrs
 
+        # Map historical comparison values into clean tracking attributes
         results = self.coordinator.data.get("comparison", {}).get("results", [])
         if results and isinstance(results, list):
             latest_comparison = results[0]
@@ -280,7 +282,7 @@ class FPLAccountNumberSensor(FPLAccountBaseSensor):
     def native_value(self):
         if not self.coordinator.data:
             return None
-        return self.coordinator.data.get("summary", {}).get("accountNumber") or {}
+        return self.coordinator.data.get("summary", {}).get("accountNumber")
 
     @property
     def extra_state_attributes(self):
@@ -289,9 +291,15 @@ class FPLAccountNumberSensor(FPLAccountBaseSensor):
             
         details = self.coordinator.data.get("lite", {}).get("data", {}).get("contractAccountDetails", {})
         address = details.get("address", {})
+        partner = details.get("businessPartner", {})
         
-        # 🟢 PRIVACY COMPLIANT: Excludes names, emails, phones, and precise street names
         return {
+            "customer_full_name": details.get("name"),
+            "first_name": partner.get("firstName"),
+            "last_name": partner.get("lastName"),
+            "email_address": address.get("email"),
+            "mobile_phone": address.get("mobilePhoneNumber"),
+            "billing_street": f"{address.get('houseNum1', '')} {address.get('street', '')}".strip(),
             "billing_city": address.get("city"),
             "billing_state": address.get("region"),
             "billing_zip": address.get("zip"),
@@ -357,7 +365,7 @@ class FPLMeterBaseSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self):
         summary_block = self.coordinator.data.get("summary", {}) if self.coordinator.data else {}
-        meter_id = summary_block.get("meterNumber", "unknown_meter")
+        meter_id = summary_block.get("meterNumber", "5814652")
         return {
             "identifiers": {(DOMAIN, f"smart_meter_{meter_id}")},
             "name": f"FPL Smart Meter ({meter_id})",
@@ -550,8 +558,6 @@ class FPLCategoryBaseSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self):
-        summary_block = self.coordinator.data.get("summary", {}) if self.coordinator.data else {}
-        meter_id = summary_block.get("meterNumber", "unknown_meter")
         return {
             "identifiers": {(DOMAIN, f"energy_breakdown_{self.coordinator.account}")},
             "name": "FPL Appliance Energy Breakdown",
